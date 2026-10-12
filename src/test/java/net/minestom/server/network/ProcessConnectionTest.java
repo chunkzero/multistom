@@ -148,6 +148,37 @@ class ProcessConnectionTest {
     }
 
     @Test
+    void connectionFactoryChoosesRejectsAndCannotAdoptForeignConnections() throws Exception {
+        try (var pair = new ServerProcessPair()) {
+            var process = pair.first();
+            var server = process.server();
+            var created = new AtomicInteger();
+            server.setConnectionFactory((channel, remoteAddress, readThread, writeThread) -> {
+                created.incrementAndGet();
+                return new PlayerSocketConnection(process, channel, remoteAddress, readThread, writeThread);
+            });
+            process.start(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
+            try (var client = new ProtocolClient(process)) {
+                client.handshake("localhost", ClientHandshakePacket.Intent.STATUS);
+                client.send(new ClientPingRequestPacket(123));
+                assertEquals(new PingResponsePacket(123), client.read());
+                assertEquals(1, created.get());
+            }
+
+            server.setConnectionFactory((_, _, _, _) -> null);
+            try (var client = new ProtocolClient(process)) {
+                assertThrows(EOFException.class, client::read);
+            }
+
+            server.setConnectionFactory((channel, remoteAddress, readThread, writeThread) ->
+                    new PlayerSocketConnection(pair.second(), channel, remoteAddress, readThread, writeThread));
+            try (var client = new ProtocolClient(process)) {
+                assertThrows(EOFException.class, client::read);
+            }
+        }
+    }
+
+    @Test
     void closingAProcessClosesSocketsWithoutPlayersAndLeavesOtherProcessesListening() throws Exception {
         try (var pair = new ServerProcessPair()) {
             pair.first().start(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
