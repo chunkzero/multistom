@@ -67,7 +67,7 @@ public abstract class Chunk implements Block.Getter, Block.Setter, Biome.Getter,
     public Chunk(Instance instance, int chunkX, int chunkZ, boolean shouldGenerate) {
         this.identifier = UUID.randomUUID();
         this.instance = instance;
-        this.tagHandler = TagHandler.newHandler(instance.process().registries());
+        this.tagHandler = TagHandler.newHandler(instance.registries());
         this.chunkX = chunkX;
         this.chunkZ = chunkZ;
         this.shouldGenerate = shouldGenerate;

@@ -3,6 +3,7 @@ package net.minestom.server.inventory.type;
 import net.kyori.adventure.text.Component;
 import net.minestom.server.ServerProcess;
 import net.minestom.server.item.enchant.Enchantment;
+import net.minestom.server.registry.Registries;
 import net.minestom.server.registry.RegistryKey;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -41,5 +42,20 @@ class EnchantmentTableInventoryTest {
 
         assertThrows(IllegalArgumentException.class, () ->
                 inventory.setEnchantmentShown(EnchantmentTableInventory.EnchantmentSlot.MIDDLE, unknown));
+    }
+
+    @Test
+    void explicitRegistryDeterminesKnownEnchantments() {
+        final Registries registries = Registries.vanilla();
+        final RegistryKey<Enchantment> custom = registries.enchantment()
+                .register("test:explicit", registries.enchantment().get(Enchantment.SHARPNESS));
+        final var slot = EnchantmentTableInventory.EnchantmentSlot.TOP;
+
+        final var defaultInventory = new EnchantmentTableInventory(process, Component.text("Enchant"));
+        assertThrows(IllegalArgumentException.class, () -> defaultInventory.setEnchantmentShown(slot, custom));
+
+        final var inventory = new EnchantmentTableInventory(process, Component.text("Enchant"), registries.enchantment());
+        inventory.setEnchantmentShown(slot, custom);
+        assertEquals(custom, inventory.getEnchantmentShown(slot));
     }
 }

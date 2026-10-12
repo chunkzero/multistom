@@ -30,6 +30,7 @@ import net.minestom.server.network.packet.server.play.BlockEntityDataPacket;
 import net.minestom.server.network.packet.server.play.MultiBlockChangePacket;
 import net.minestom.server.network.packet.server.play.UnloadChunkPacket;
 import net.minestom.server.network.packet.server.play.WorldEventPacket;
+import net.minestom.server.registry.Registries;
 import net.minestom.server.registry.RegistryKey;
 import net.minestom.server.utils.PacketSendingUtils;
 import net.minestom.server.utils.async.AsyncUtils;
@@ -101,7 +102,15 @@ public class InstanceContainer extends Instance {
     protected InstanceContainer srcInstance; // only present if this instance has been created using a copy
     private volatile long lastBlockChangeTime; // Time at which the last block change happened (#setBlock)
 
-    @SuppressWarnings("this-escape") // deliberate self registration during construction
+    /**
+     * Creates an instance container using the registries of {@code process}.
+     *
+     * @param process the process owning the instance
+     * @param uuid the instance ID
+     * @param dimensionType the dimension type
+     * @param loader the chunk loader, or {@code null} to use the default loader
+     * @param dimensionName the dimension name sent to clients
+     */
     public InstanceContainer(
             ServerProcess process,
             UUID uuid,
@@ -109,7 +118,30 @@ public class InstanceContainer extends Instance {
             @Nullable ChunkLoader loader,
             Key dimensionName
     ) {
-        super(process, uuid, dimensionType, dimensionName);
+        this(process, process.registries(), uuid, dimensionType, loader, dimensionName);
+    }
+
+    /**
+     * Creates an instance container with the given registry context and dimension name.
+     *
+     * @param process the process owning the instance
+     * @param registries the registry context used by the instance
+     * @param uuid the instance ID
+     * @param dimensionType the dimension type
+     * @param loader the chunk loader, or {@code null} to use the default loader
+     * @param dimensionName the dimension name sent to clients
+     * @throws IllegalArgumentException if {@code dimensionType} is not registered in {@code registries}
+     */
+    @SuppressWarnings("this-escape") // deliberate self registration during construction
+    public InstanceContainer(
+            ServerProcess process,
+            Registries registries,
+            UUID uuid,
+            RegistryKey<DimensionType> dimensionType,
+            @Nullable ChunkLoader loader,
+            Key dimensionName
+    ) {
+        super(process, registries, uuid, dimensionType, dimensionName);
         setChunkSupplier(DynamicChunk::new);
         setChunkLoader(Objects.requireNonNullElse(loader, DEFAULT_LOADER));
         this.chunkLoader.loadInstance(this);
@@ -119,6 +151,19 @@ public class InstanceContainer extends Instance {
 
     public InstanceContainer(ServerProcess process, UUID uuid, RegistryKey<DimensionType> dimensionType) {
         this(process, uuid, dimensionType, null, dimensionType.key());
+    }
+
+    /**
+     * Creates an instance container whose dimension name is taken from its dimension type.
+     *
+     * @param process the process owning the instance
+     * @param registries the registry context used by the instance
+     * @param uuid the instance ID
+     * @param dimensionType the dimension type
+     * @throws IllegalArgumentException if {@code dimensionType} is not registered in {@code registries}
+     */
+    public InstanceContainer(ServerProcess process, Registries registries, UUID uuid, RegistryKey<DimensionType> dimensionType) {
+        this(process, registries, uuid, dimensionType, null, dimensionType.key());
     }
 
     @Override
@@ -600,13 +645,13 @@ public class InstanceContainer extends Instance {
      * Copies all the chunks of this instance and create a new instance container with all of them.
      * <p>
      * Chunks are copied with {@link Chunk#copy(Instance, int, int)},
-     * {@link UUID} is randomized, and the process, {@link DimensionType}, and dimension name are passed over.
+     * {@link UUID} is randomized, and the process, registries, {@link DimensionType}, and dimension name are passed over.
      *
      * @return an {@link InstanceContainer} with the exact same chunks as 'this'
      * @see #getSrcInstance() to retrieve the "creation source" of the copied instance
      */
     public synchronized InstanceContainer copy() {
-        InstanceContainer copiedInstance = new InstanceContainer(process(), UUID.randomUUID(), getDimensionType(), null, Key.key(getDimensionName()));
+        InstanceContainer copiedInstance = new InstanceContainer(process(), registries(), UUID.randomUUID(), getDimensionType(), null, Key.key(getDimensionName()));
         copiedInstance.srcInstance = this;
         copiedInstance.tagHandler = this.tagHandler.copy();
         copiedInstance.lastBlockChangeTime = this.lastBlockChangeTime;
