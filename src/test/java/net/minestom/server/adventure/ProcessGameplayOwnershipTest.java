@@ -331,7 +331,7 @@ class ProcessGameplayOwnershipTest {
             assertEquals(Component.translatable("death.attack.second"), damage.buildDeathScreenText(second));
             var damagePackets = bc.trackIncoming(DamageEventPacket.class);
             assertTrue(second.damage(damage));
-            damagePackets.assertSingle(packet -> assertEquals(damage.getTypeId(), packet.damageTypeId()));
+            damagePackets.assertSingle(packet -> assertEquals(secondType, packet.damageType()));
             assertThrows(IllegalArgumentException.class, () -> first.damage(damage));
         }
     }

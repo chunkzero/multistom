@@ -52,7 +52,7 @@ public class BlockPredicatesTest extends AbstractItemComponentRegistriesTest<Blo
     public void testSingleBlockNbtInput(Registries registries) throws IOException {
         var tag = MinestomAdventure.tagStringIO().asTag("{blocks:'minecraft:stone'}");
         var component = assertOk(DataComponents.CAN_PLACE_ON.decode(Transcoder.NBT, tag));
-        var expected = new BlockPredicates(new BlockPredicate(RegistryTag.direct(RegistryKey.unsafeOf("minecraft:stone"))));
+        var expected = new BlockPredicates(new BlockPredicate(RegistryTag.direct(RegistryKey.of("minecraft:stone"))));
         assertEquals(expected, component);
         assertEquals(1, component.predicates().getFirst().blocks().resolve(registries.blocks()).size());
         assertTrue(component.predicates().getFirst().blocks().contains(registries.blocks(), BlockKeys.STONE));

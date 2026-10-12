@@ -15,7 +15,7 @@ class DynamicRegistryFreezeTest {
     void explicitFreezeRejectsEntryChangesAndLeavesTagsMutable() {
         var registry = DynamicRegistry.fromMap(Key.key("test:registry"), Map.entry(Key.key("test:entry"), "original"));
         var entryKey = registry.getKey(Key.key("test:entry"));
-        var tagKey = TagKey.<String>unsafeOf("test:tag");
+        var tagKey = TagKey.<String>of("test:tag");
         assertFalse(registry.isFrozen());
         registry.freeze();
         registry.freeze();

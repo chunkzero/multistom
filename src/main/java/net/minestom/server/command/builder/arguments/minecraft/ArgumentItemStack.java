@@ -80,9 +80,13 @@ public class ArgumentItemStack extends Argument<ItemStack> {
                 reader.consume('=');
 
                 final Result<Object> componentValueResult = (Result<Object>) component.decode(coder, reader.readTag());
-                if (componentValueResult instanceof Result.Error<Object>(String message))
-                    throw new ArgumentSyntaxException(message, input, INVALID_COMPONENT);
-                components.set((DataComponent<Object>) component, componentValueResult.orElseThrow());
+                final Object componentValue = switch (componentValueResult) {
+                    case Result.Ok(var value) -> value;
+                    case Result.Error(var message) ->
+                            throw new ArgumentSyntaxException(
+                                    "Invalid item component: " + message, input, INVALID_COMPONENT);
+                };
+                components.set((DataComponent<Object>) component, componentValue);
 
                 if (reader.peek() != ']')
                     reader.consume(',');

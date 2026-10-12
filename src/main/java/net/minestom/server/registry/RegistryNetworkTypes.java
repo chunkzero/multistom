@@ -99,7 +99,7 @@ final class RegistryNetworkTypes {
                 final var key = buffer.read(NetworkBuffer.KEY);
                 final var tag = registry.getTag(key);
                 Check.stateCondition(tag == null, "No such tag {0} for registry {1}", key, registry.key());
-                return RegistryTag.reference(TagKey.unsafeOf(key));
+                return RegistryTag.reference(TagKey.of(key));
             } else if (encodedCount == 1) {
                 return RegistryTag.empty();
             } else {

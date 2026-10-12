@@ -243,7 +243,6 @@ public sealed interface Block extends StaticProtocolObject<Block>, TagReadable, 
      */
     @Deprecated(forRemoval = true)
     @SuppressWarnings("removal")
-    @Override
     @Contract(pure = true)
     RegistryData.BlockEntry registry();
 
@@ -273,15 +272,6 @@ public sealed interface Block extends StaticProtocolObject<Block>, TagReadable, 
     }
 
     /**
-     * @deprecated use {@link #air()}
-     */
-    @Deprecated(forRemoval = true)
-    @Contract(pure = true)
-    default boolean isAir() {
-        return air();
-    }
-
-    /**
      * Returns the vanilla solid-state classification for this block state.
      * <p>
      * This is not a collision or motion-blocking check. For example, cobweb and bamboo sapling are classified as
@@ -293,15 +283,6 @@ public sealed interface Block extends StaticProtocolObject<Block>, TagReadable, 
     @Contract(pure = true)
     default boolean solid() {
         return registry().isSolid();
-    }
-
-    /**
-     * @deprecated use {@link #solid()}
-     */
-    @Deprecated(forRemoval = true)
-    @Contract(pure = true)
-    default boolean isSolid() {
-        return solid();
     }
 
     /**
@@ -331,15 +312,6 @@ public sealed interface Block extends StaticProtocolObject<Block>, TagReadable, 
     }
 
     /**
-     * @deprecated use {@link #liquid()}
-     */
-    @Deprecated(forRemoval = true)
-    @Contract(pure = true)
-    default boolean isLiquid() {
-        return liquid();
-    }
-
-    /**
      * Returns whether this block state contains a non-empty fluid.
      * <p>
      * This includes liquid blocks such as water and lava as well as waterlogged block states. Therefore every
@@ -350,15 +322,6 @@ public sealed interface Block extends StaticProtocolObject<Block>, TagReadable, 
     @Contract(pure = true)
     default boolean fluid() {
         return registry().isFluid();
-    }
-
-    /**
-     * @deprecated use {@link #fluid()}
-     */
-    @Deprecated(forRemoval = true)
-    @Contract(pure = true)
-    default boolean isFluid() {
-        return fluid();
     }
 
     /**

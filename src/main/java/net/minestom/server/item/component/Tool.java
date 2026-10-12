@@ -51,16 +51,12 @@ public record Tool(List<Rule> rules, float defaultMiningSpeed, int damagePerBloc
     }
 
     /**
-     * Tests the first matching rule against the supplied block registry.
+     * Returns whether this tool is correct for drops from the given block key.
      *
-     * @deprecated use {@link #isCorrectForDrops(Registry, RegistryKey)} with {@link Block#registryKey()}
+     * @param registry the block registry used to resolve rule tags
+     * @param block    the block key to test
+     * @return whether the first matching rule marks this tool as correct for drops
      */
-    @Deprecated(forRemoval = true)
-    public boolean isCorrectForDrops(Registry<Block> registry, Block block) {
-        return isCorrectForDrops(registry, block.registryKey());
-    }
-
-    /** Tests the first matching rule against the supplied block registry. */
     public boolean isCorrectForDrops(Registry<Block> registry, RegistryKey<Block> block) {
         for (Rule rule : rules) {
             if (rule.correctForDrops != null && rule.blocks.contains(registry, block)) {
@@ -71,16 +67,12 @@ public record Tool(List<Rule> rules, float defaultMiningSpeed, int damagePerBloc
     }
 
     /**
-     * Returns the first matching rule's speed in the supplied block registry.
+     * Returns this tool's mining speed for the given block key.
      *
-     * @deprecated use {@link #getSpeed(Registry, RegistryKey)} with {@link Block#registryKey()}
+     * @param registry the block registry used to resolve rule tags
+     * @param block    the block key to test
+     * @return the first matching rule's speed, or {@link #defaultMiningSpeed()} when none match
      */
-    @Deprecated(forRemoval = true)
-    public float getSpeed(Registry<Block> registry, Block block) {
-        return getSpeed(registry, block.registryKey());
-    }
-
-    /** Returns the first matching rule's speed in the supplied block registry. */
     public float getSpeed(Registry<Block> registry, RegistryKey<Block> block) {
         for (Rule rule : rules) {
             if (rule.speed != null && rule.blocks.contains(registry, block)) {

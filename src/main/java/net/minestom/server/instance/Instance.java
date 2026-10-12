@@ -158,17 +158,31 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
      * @param uuid          the {@link UUID} of the instance
      * @param dimensionType the {@link DimensionType} of the instance
      */
-    @SuppressWarnings("this-escape") // deliberate self registration during construction
     public Instance(ServerProcess process, UUID uuid, RegistryKey<DimensionType> dimensionType, Key dimensionName) {
-        this.process = Objects.requireNonNull(process,
-                "A ServerProcess is required; use an Instance constructor accepting ServerProcess or process.instanceManager().createInstanceContainer()");
-        this.registries = process.registries();
+        this(process, process.registries(), uuid, dimensionType, dimensionName);
+    }
+
+    /**
+     * Creates an instance with the given registry context and dimension name.
+     *
+     * @param process the process owning the instance
+     * @param registries the registry context used by the instance
+     * @param uuid the instance ID
+     * @param dimensionType the dimension type
+     * @param dimensionName the dimension name sent to clients
+     * @throws IllegalArgumentException if {@code dimensionType} is not registered in {@code registries}
+     */
+    @SuppressWarnings("this-escape") // deliberate self registration during construction
+    public Instance(ServerProcess process, Registries registries, UUID uuid, RegistryKey<DimensionType> dimensionType, Key dimensionName) {
+        this.process = Objects.requireNonNull(process, "process");
+        this.registries = registries;
         this.tagHandler = TagHandler.newHandler(registries);
         this.entityTracker = EntityTracker.newTracker(process);
         this.uuid = uuid;
         this.dimensionType = dimensionType;
         this.cachedDimensionType = registries.dimensionType().get(dimensionType);
-        Check.argCondition(cachedDimensionType == null, "The dimension " + dimensionType + " is not registered in this process.");
+        Check.argCondition(cachedDimensionType == null,
+                "The dimension {0} is not registered in the supplied registry context", dimensionType);
         this.dimensionName = dimensionName.asString();
 
         this.clocks = new Object2ObjectArrayMap<>();
@@ -186,12 +200,29 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
         this(process, uuid, dimensionType, dimensionType.key());
     }
 
+    /**
+     * Creates an instance whose dimension name is taken from its dimension type.
+     *
+     * @param process the process owning the instance
+     * @param registries the registry context used by the instance
+     * @param uuid the instance ID
+     * @param dimensionType the dimension type
+     * @throws IllegalArgumentException if {@code dimensionType} is not registered in {@code registries}
+     */
+    public Instance(ServerProcess process, Registries registries, UUID uuid, RegistryKey<DimensionType> dimensionType) {
+        this(process, registries, uuid, dimensionType, dimensionType.key());
+    }
+
     @Override
     public final ServerProcess process() {
         return process;
     }
 
-    /** Gets the registries owned by this instance's process. */
+    /**
+     * Gets the registries used by this instance.
+     *
+     * @return the registries
+     */
     public Registries registries() {
         return registries;
     }
@@ -597,11 +628,10 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
      */
     public void setWorldBorder(WorldBorder worldBorder, double transitionTime) {
         Check.stateCondition(transitionTime < 0, "Transition time cannot be lower than 0");
-        long transitionMilliseconds = (long) (transitionTime * 1000);
-        sendNewWorldBorderPackets(worldBorder, transitionMilliseconds);
+        long transitionTicks = (long) (transitionTime * 1000) / Tick.SERVER_TICKS.getDuration().toMillis();
+        sendNewWorldBorderPackets(worldBorder, transitionTicks);
 
         this.targetBorderDiameter = worldBorder.diameter();
-        long transitionTicks = transitionMilliseconds / Tick.SERVER_TICKS.getDuration().toMillis();
         remainingWorldBorderTransitionTicks = transitionTicks;
         if (transitionTicks == 0) this.worldBorder = worldBorder;
         else this.worldBorder = worldBorder.withDiameter(this.worldBorder.diameter());
@@ -619,14 +649,14 @@ public abstract class Instance implements Block.Getter, Block.Setter, Biome.Gett
      * Creates the {@link InitializeWorldBorderPacket} sent to players who join this instance.
      */
     public InitializeWorldBorderPacket createInitializeWorldBorderPacket() {
-        return worldBorder.createInitializePacket(targetBorderDiameter, remainingWorldBorderTransitionTicks * Tick.SERVER_TICKS.getDuration().toMillis());
+        return worldBorder.createInitializePacket(targetBorderDiameter, remainingWorldBorderTransitionTicks);
     }
 
-    private void sendNewWorldBorderPackets(WorldBorder newBorder, long transitionMilliseconds) {
+    private void sendNewWorldBorderPackets(WorldBorder newBorder, long transitionTicks) {
         // Only send the relevant border packets
         if (this.worldBorder.diameter() != newBorder.diameter()) {
-            if (transitionMilliseconds == 0) sendGroupedPacket(newBorder.createSizePacket());
-            else sendGroupedPacket(this.worldBorder.createLerpSizePacket(newBorder.diameter(), transitionMilliseconds));
+            if (transitionTicks == 0) sendGroupedPacket(newBorder.createSizePacket());
+            else sendGroupedPacket(this.worldBorder.createLerpSizePacket(newBorder.diameter(), transitionTicks));
         }
         if (this.worldBorder.centerX() != newBorder.centerX() || this.worldBorder.centerZ() != newBorder.centerZ()) {
             sendGroupedPacket(newBorder.createCenterPacket());
