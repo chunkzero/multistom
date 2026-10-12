@@ -47,6 +47,52 @@ public class SendablePacketTest {
     }
 
     @Test
+    public void cachedBodyReusesCachedPacket() {
+        try (var pool = new PacketBufferPool(Registries.vanilla())) {
+            var context = pool.context(ConnectionState.PLAY, 256);
+            var packet = new SystemChatPacket(Component.text("Hello World!"), false);
+            var calls = new AtomicInteger();
+            var cached = new CachedPacket(() -> {
+                calls.incrementAndGet();
+                return packet;
+            });
+            assertFalse(cached.isValid());
+
+            // May fail in the very unlikely case where soft references are cleared
+            assertSame(packet, cached.packet(context));
+            assertSame(packet, cached.packet(context));
+            assertEquals(1, calls.get());
+            assertTrue(cached.isValid());
+
+            var buffer = context.frame(packet);
+            var cachedBuffer = cached.body(context);
+            assertTrue(NetworkBuffer.equals(buffer, cachedBuffer));
+            assertSame(cachedBuffer, cached.body(context));
+            assertSame(packet, cached.packet(context));
+            assertEquals(1, calls.get());
+
+            cached.invalidate();
+            assertFalse(cached.isValid());
+            assertTrue(NetworkBuffer.equals(buffer, cached.body(context)));
+            assertSame(packet, cached.packet(context));
+            assertEquals(2, calls.get());
+        }
+    }
+
+    @Test
+    public void cachedPacketIsNotFramed() {
+        try (var pool = new PacketBufferPool(Registries.vanilla())) {
+            // System chat has no packet ID in the login state, so framing it there fails
+            var packet = new SystemChatPacket(Component.text("Hello World!"), false);
+            var cached = new CachedPacket(packet);
+            assertSame(packet, cached.packet(pool.context(ConnectionState.LOGIN, 256)));
+            assertTrue(cached.isValid());
+            var context = pool.context(ConnectionState.PLAY, 256);
+            assertTrue(NetworkBuffer.equals(context.frame(packet), cached.body(context)));
+        }
+    }
+
+    @Test
     @Timeout(10)
     void concurrentContextsSerializeTheSupplier() throws Exception {
         try (var pool = new PacketBufferPool(Registries.vanilla());
@@ -70,12 +116,12 @@ public class SendablePacketTest {
             var second = executor.submit(() -> readConcurrentCache(cached, secondContext, barrier));
             first.get(5, TimeUnit.SECONDS);
             second.get(5, TimeUnit.SECONDS);
-            assertTrue(calls.get() >= 2);
-            int previousCalls = calls.get();
+            // May fail in the very unlikely case where soft references are cleared
+            assertEquals(1, calls.get());
             cached.invalidate();
             assertFalse(cached.isValid());
             assertSame(packet, cached.packet(firstContext));
-            assertEquals(previousCalls + 1, calls.get());
+            assertEquals(2, calls.get());
         }
     }
 

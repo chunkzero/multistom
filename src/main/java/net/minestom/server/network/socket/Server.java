@@ -31,6 +31,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class Server implements ProcessOwned {
+    private volatile ConnectionFactory connectionFactory;
     private volatile boolean stop;
     private final Set<PlayerSocketConnection> connections = new HashSet<>();
     private @UnknownNullability Thread acceptThread;
@@ -46,6 +47,8 @@ public final class Server implements ProcessOwned {
     public Server(ServerProcess process, PacketParser.Client packetParser) {
         this.process = Objects.requireNonNull(process);
         this.packetParser = packetParser;
+        this.connectionFactory = (channel, remoteAddress, readThread, writeThread) ->
+                new PlayerSocketConnection(process, channel, remoteAddress, readThread, writeThread);
     }
 
     @Override
@@ -118,7 +121,13 @@ public final class Server implements ProcessOwned {
                     configureSocket(client);
                     Thread readThread = readBuilder.unstarted(() -> playerReadLoop(reference.get()));
                     Thread writeThread = writeBuilder.unstarted(() -> playerWriteLoop(reference.get()));
-                    PlayerSocketConnection connection = new PlayerSocketConnection(process(), client, client.getRemoteAddress(), readThread, writeThread);
+                    PlayerSocketConnection connection = connectionFactory.create(client, client.getRemoteAddress(), readThread, writeThread);
+                    if (connection == null) {
+                        client.close(); // Rejected by the factory
+                        continue;
+                    }
+                    if (connection.process() != process())
+                        throw new IllegalStateException("Connection belongs to another process");
                     reference.set(connection);
                     synchronized (this) {
                         if (stop) {
@@ -277,6 +286,14 @@ public final class Server implements ProcessOwned {
             failures.forEach(failure::addSuppressed);
             throw failure;
         }
+    }
+
+    public void setConnectionFactory(ConnectionFactory connectionFactory) {
+        this.connectionFactory = Objects.requireNonNull(connectionFactory);
+    }
+
+    public ConnectionFactory connectionFactory() {
+        return connectionFactory;
     }
 
     @ApiStatus.Internal

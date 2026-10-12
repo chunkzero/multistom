@@ -2,6 +2,7 @@ package net.minestom.server.network.packet.server;
 
 import net.minestom.server.network.NetworkBuffer;
 import net.minestom.server.network.packet.PacketEncodingContext;
+import net.minestom.server.property.ServerProperties;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,9 +28,9 @@ import java.util.function.Supplier;
  * the packet supplier directly. The supplier must therefore be thread safe if
  * this object may be accessed concurrently while caching is disabled.
  *
- * <p>One representation is retained, for the most recently used encoding context.
+ * <p>One framed representation is retained, for the most recently used encoding context.
  * Sharing this object across owners, connection states, or compression settings is safe:
- * a different context replaces the cached representation. Registry definitions must
+ * a different context replaces the framed representation and reuses the cached packet. Registry definitions must
  * remain stable while the representation is cached; call {@link #invalidate()} after
  * changing definitions or the supplied packet.
  */
@@ -39,7 +40,7 @@ public final class CachedPacket implements SendablePacket {
 
     static {
         try {
-            PACKET = MethodHandles.lookup().findVarHandle(CachedPacket.class, "packet", SoftReference.class);
+            PACKET = MethodHandles.lookup().findVarHandle(CachedPacket.class, "cache", SoftReference.class);
         } catch (ReflectiveOperationException e) {
             throw new ExceptionInInitializerError(e);
         }
@@ -49,7 +50,7 @@ public final class CachedPacket implements SendablePacket {
 
     // Accessed through PACKET using acquire/release semantics.
     @SuppressWarnings("unused")
-    private @Nullable SoftReference<FramedPacket> packet;
+    private @Nullable SoftReference<Cache> cache;
 
     /**
      * Creates a cached packet backed by the given packet supplier.
@@ -98,24 +99,28 @@ public final class CachedPacket implements SendablePacket {
      * Returns the packet represented by this cached value.
      *
      * <p>When caching is enabled, this method may initialize or reuse the cached
-     * framed packet. Supplier invocation and cache computation are serialized.
+     * packet. Supplier invocation and cache computation are serialized.
      *
      * <p>When caching is disabled, the packet supplier is invoked directly and
      * may be invoked concurrently by multiple callers.
      *
-     * @param context the owner, connection state, and negotiated compression used when framing
+     * @param context the owner, connection state, and negotiated compression of the caller
      * @return the packet value
      */
     public ServerPacket packet(PacketEncodingContext context) {
-        final FramedPacket cache = framed(context);
-        return cache != null ? cache.packet() : packetSupplier.get();
+        final ServerProperties properties = context.properties();
+        if (!properties.cachedPacket().get()) return packetSupplier.get();
+        final Cache cache = cache();
+        return cache != null ? cache.packet() : computePacket(properties);
     }
 
     /**
-     * Returns the cached framed packet body for the given connection state.
+     * Returns the cached framed packet body for the given encoding context.
      *
-     * <p>If caching is enabled, this method initializes the cache when necessary.
-     * Cache computation and supplier invocation are serialized.
+     * <p>If caching is enabled, this method frames the packet for
+     * {@code context} when no body is cached for it yet, reusing the cached
+     * packet when one exists. Cache computation and supplier invocation are
+     * serialized.
      *
      * <p>If caching is disabled, no framed body is created and {@code null} is
      * returned.
@@ -124,12 +129,12 @@ public final class CachedPacket implements SendablePacket {
      * @return the framed packet body, or {@code null} when caching is disabled
      */
     public @Nullable NetworkBuffer body(PacketEncodingContext context) {
-        final FramedPacket cache = framed(context);
-        return cache != null ? cache.body() : null;
+        final FramedPacket framed = framed(context);
+        return framed != null ? framed.body() : null;
     }
 
     /**
-     * Returns the current cached value, computing it when absent.
+     * Returns the framed packet cached for the given encoding context, computing it when absent.
      *
      * @param context the owner, connection state, and negotiated compression used when framing
      * @return the cached framed packet, or {@code null} when caching is disabled
@@ -137,54 +142,73 @@ public final class CachedPacket implements SendablePacket {
     public @Nullable FramedPacket framed(PacketEncodingContext context) {
         if (!context.properties().cachedPacket().get()) return null;
 
-        final FramedPacket cache = cachedPacket();
-        return cache != null && cache.context().equals(context) ? cache : computeCache(context);
+        final Cache cache = cache();
+        final FramedPacket framed = cache != null ? cache.framed() : null;
+        return framed != null && framed.context().equals(context) ? framed : computeFramed(context);
     }
 
     /**
-     * Returns an existing cached value or computes and publishes a replacement.
+     * Returns the cached packet, computing it when absent.
      *
      * <p>This method is synchronized so that only one thread invokes the packet
-     * supplier and computes a replacement cache entry at a time. The cache is
-     * checked again after acquiring this object's monitor because another thread
-     * may have populated it while the current thread was waiting.
+     * supplier at a time. The cache is checked again after acquiring this
+     * object's monitor because another thread may have populated it while the
+     * current thread was waiting.
+     *
+     * @param properties the properties of the owner requesting the packet
+     * @return the existing or newly computed packet
+     */
+    private synchronized ServerPacket computePacket(ServerProperties properties) {
+        final Cache cache = cache();
+        if (cache != null) return cache.packet();
+        final ServerPacket packet = packetSupplier.get();
+        PACKET.setRelease(this, new SoftReference<>(new Cache(properties, packet, null)));
+        return packet;
+    }
+
+    /**
+     * Returns the existing framed packet or computes and publishes one.
+     *
+     * <p>This method is synchronized so that only one thread invokes the packet
+     * supplier and frames a replacement at a time. The cache is checked again
+     * after acquiring this object's monitor because another thread may have
+     * populated it while the current thread was waiting.
      *
      * <p>Invalidation does not acquire this monitor. An invalidation occurring
      * during computation may therefore be followed by publication of the
      * in progress result.
      *
      * @param context the owner, connection state, and negotiated compression used when framing
-     * @return the existing or newly computed framed packet
+     * @return the existing or newly framed packet
      */
-    private synchronized FramedPacket computeCache(PacketEncodingContext context) {
-        final FramedPacket cache = cachedPacket();
-        if (cache != null && cache.context().equals(context)) return cache;
+    private synchronized FramedPacket computeFramed(PacketEncodingContext context) {
+        final Cache cache = cache();
+        final FramedPacket cached = cache != null ? cache.framed() : null;
+        if (cached != null && cached.context().equals(context)) return cached;
 
-        final ServerPacket packet = packetSupplier.get();
-        final NetworkBuffer buffer = context.frame(packet);
-
-        final FramedPacket updated = new FramedPacket(context, packet, buffer);
-        PACKET.setRelease(this, new SoftReference<>(updated));
-        return updated;
+        final ServerPacket packet = cache != null ? cache.packet() : packetSupplier.get();
+        final FramedPacket framed = new FramedPacket(context, packet, context.frame(packet));
+        PACKET.setRelease(this, new SoftReference<>(new Cache(context.properties(), packet, framed)));
+        return framed;
     }
 
     /**
-     * Returns the currently referenced cached packet.
+     * Returns the currently referenced cache.
      *
      * <p>The cached reference is read using acquire semantics.
      *
-     * @return the cached framed packet, or {@code null} if no cache exists or
-     * the soft reference has been cleared
+     * @return the cache, or {@code null} if no cache exists or the soft
+     * reference has been cleared
      */
     @SuppressWarnings("unchecked")
-    private @Nullable FramedPacket cachedPacket() {
-        final SoftReference<FramedPacket> ref = (SoftReference<FramedPacket>) PACKET.getAcquire(this);
+    private @Nullable Cache cache() {
+        final SoftReference<Cache> ref = (SoftReference<Cache>) PACKET.getAcquire(this);
         return ref != null ? ref.get() : null;
     }
 
     /**
-     * Returns whether a framed packet is currently cached and has not been
-     * reclaimed.
+     * Returns whether a packet is currently cached and has not been
+     * reclaimed. The cached packet may not have been framed yet.
      *
      * <p>This result is inherently transient because the underlying soft
      * reference may be cleared or the cache may be invalidated immediately
@@ -194,8 +218,8 @@ public final class CachedPacket implements SendablePacket {
      * available
      */
     public boolean isValid() {
-        final FramedPacket cache = cachedPacket();
-        return cache != null && cache.context().properties().cachedPacket().get();
+        final Cache cache = cache();
+        return cache != null && cache.properties().cachedPacket().get();
     }
 
     /**
@@ -209,6 +233,11 @@ public final class CachedPacket implements SendablePacket {
      */
     @Override
     public String toString() {
-        return String.format("CachedPacket{cache=%s}", cachedPacket());
+        return String.format("CachedPacket{cache=%s}", cache());
+    }
+
+    // The packet, plus its framing for the most recently used encoding context once one requested it.
+    // Requires identity
+    private record Cache(ServerProperties properties, ServerPacket packet, @Nullable FramedPacket framed) {
     }
 }
